@@ -61,18 +61,18 @@ interactiveAddElements () {
 	done
 }
 
-# Function to add elements, automatically choosing to do it interactivement or not
+# Function to add elements, automatically choosing to do it interactively or not
 addElements () {
 	# If no value for download (next element is an argument, starting with a "-", or no value is given at all), trigger interactive element adding
 	if [[ "${2:0:1}" == "-" || $# == 0 ]]; then
 		interactiveAddElements
-		# Else, parse every element until it's an argument
+	# Else, parse every element until it's an argument
 	else
 		# We shift to the next element to avoid adding the download argument (-d/--download/--dl) to the "things to download" array
 		shift
 		# While the next element isn't an argument (aka doesn't starts with "-"), add the element to the array and shift elements to the left
 		while [[ "${1:0:1}" == "-" ]]; do
-			toDownload=("$1")
+			toDownload+=("$1")
 			shift
 		done
 	fi
