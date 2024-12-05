@@ -22,6 +22,17 @@ DEST="" # Destination to put the downloaded files at the end
 ORPHEUSVENV="./.venv-orpheus" # Venv for orpheusdl
 STREAMRIPVENV="./venv-streamrip" # Venv for streamrip
 
+# If last command exit status was an error, print the wanted error message & exit
+checkError() {
+	errorCode=$?
+	if errorCode != 0; then
+		echo "
+		${RED}ERROR${RESET} (code $errorCode): $1
+		"
+		exit 1
+	fi
+}
+
 # Function to let user choose the type of the content to download
 assignType () {
 	userType=$(echo "$1" | tr [A-Z] [a-z]) # We make the type provided by the user lowercase, just in case
@@ -38,12 +49,18 @@ assignType () {
 
 # Function to let the user choose the path to the virtual environment
 assignVenv () {
+	userVenv=$1 # We save the venv provided by the user to easily apply modifications to it
+	# If VENV path doesn't start with "./", we add it (because it's prettier, and avoids confusion)
+	# BUT we dont add it if it's an absolute path (starts with "/")
+	if [[ "${userVenv:0:2}" != "./" && "${userVenv:0:1}" != "/" ]]; then
+		userVenv="./$1"
+	fi
 	# We check that the path exists
 	if [[ -e "$1" ]]; then
-		VENV=$1
+		VENV="$userVenv"
 	# We output with an error if the path doesn't exists
 	else
-		echo -e "${RED}ERROR${RESET}: The path you gave for the python virtual environment doesn't exists: ${YELLOW}$1${RESET}"
+		echo -e "${RED}ERROR${RESET}: The path you gave for the python virtual environment doesn't exists: ${YELLOW}$userVenv${RESET}"
 		exit 1
 	fi
 }
@@ -68,10 +85,8 @@ addElements () {
 		interactiveAddElements
 	# Else, parse every element until it's an argument
 	else
-		# We shift to the next element to avoid adding the download argument (-d/--download/--dl) to the "things to download" array
-		shift
 		# While the next element isn't an argument (aka doesn't starts with "-"), add the element to the array and shift elements to the left
-		while [[ "${1:0:1}" == "-" ]]; do
+		while [[ "${1:0:1}" != "-" && $# -gt 0 ]]; do
 			toDownload+=("$1")
 			shift
 		done
@@ -138,37 +153,47 @@ orpheusHelp () {
 ${RED}Usage:${RESET} $0 orpheus [OPTIONS]
 
   ${RED}Options:${RESET}
-    ${GREEN}--module${RESET}	Install the OrpheusDL modules located at the given Github link
+    ${GREEN}--module${RESET}		Install the OrpheusDL modules located at the given Github link
     ${GREEN}-h, --help${RESET}		Show this message and exit
+    ${GREEN}-d, --download${RESET}	${YELLOW}Content${RESET} to download, each element being separated by a space. If ${YELLOW}unset${RESET}, switch to interactive download mode.
+    ${GREEN}-i, --install${RESET}	Install OrpheusDL & creates a python virtualenv at $VENV
+    ${GREEN}-m, --move${RESET}		Where to move the files after download. If unset, files won't be moved.
     ${GREEN}-p, --platform${RESET}	Platform you want to download from
-    ${GREEN}-t, --type${RESET}		Type of the media you want to download
-    ${GREEN}-i, --install${RESET}	Install OrpheusDL & creates a python virtualenv at $PWD/.orpheusdl
-    ${GREEN}-d, --download${RESET}	${YELLOW}Content${RESET}, each element being separated by a space. If unset, switch to interactive download mode.
-	${GREEN}-m, --move${RESET}	Where to move the files after download. If unset, files won't be moved.
+    ${GREEN}-z, --zfill${RESET}		Add a zero before each track number if needed
 
 
   ${RED}Definitions:${RESET}
     ${YELLOW}content${RESET}	Something to download. Can be an URL or, in case of qobuz, an album id, an artist id...
+    ${YELLOW}unset${RESET}	To let the --download option unset, you can not put it in your command, or put it without any argument, and add options after it
 "
 }
 
 # Function to download items with OrpheusDL
 downloadOrpheus () {
+	previousDir="$PWD" # We save the directory the program is executed from
+	cd "$ORPHEUSDIR" # Enter the directory where OrpheusDL is stored, or exit with an error
 	source "$VENV" # Source the virtual environment
 	for i in "${toDownload[@]}"; do
 		python "$ORPHEUSDIR" "$i"
 	done
+	# going back to where the command has been launch; go to home if it fails; exit with an error if even this fails
+	cd "$previousDir" ||
+		echo "Couldn't find the directory you launched the command from, cd'ing in $HOME"; cd "$HOME" ||
+		echo "${RED}ERROR${RESET}: Can't find nor the directory you were in, nor an home directory"; exit 1 
 }
 
 # Function to install OrpheusDL
 installOrpheus () {
 	echo -e "${GREEN}Cloning OrpheusDL...${RESET} \n"
 	git clone "https://github.com/OrfiTeam/OrpheusDL"
+	checkError "Can't clone OrpheusDL github repository. Maybe check your internet connection?"
 	echo -e "${GREEN}Creating the python virtual environment for OrpheusDL...${RESET} \n"
-	python -m venv $VENV
+	python -m venv "$VENV"
+	checkError "Can't create the python virtual environment. Check python is correctly installed."
 	echo -e "${GREEN}Installing OrpheusDL requirements...${RESET}"
-	source $VENV/bin/activate # Sourcing the virtual environment
+	source "$VENV/bin/activate" # Sourcing the virtual environment
 	cd OrpheusDL && pip install -r requirements.txt && python3 orpheus.py settings refresh && cd ..
+	checkError "Can't install OrpheusDL requirements. Check for your internet, your python installation, and if ${GREEN}${ORPHEUSDIR}${RESET} is the correct OrpeusDL location"
 	deactivate # Deactivating the virtual environment
 	echo -e "\n ${GREEN}Done!${RESET}"
 }
@@ -199,8 +224,10 @@ orpheus () {
 			"-i" | "--install" )
 				installOrpheus
 		esac
-		# We shift elements to the left until we encounter an argument, or until there is no argument left
-		while [[ $# -gt 0 || "${1:0:1}" != "-" ]]; do
+		# We do a simple shift, to remove the argument we just treated
+		shift
+		# We shift elements to the left until we encounter another argument, or until there is no argument left
+		while [[ $# -gt 0 && "${1:0:1}" != "-" ]]; do
 			shift
 		done
 	done
@@ -246,6 +273,7 @@ streamrip () {
 	fi
 	# Parsing the arguments while there is arguments
 	while [[ $# -gt 0 ]]; do
+		print $#
 		# We treat the first argument
 		case $1 in
 			"-i" | "--install")
@@ -261,7 +289,7 @@ streamrip () {
 }
 
 # Parse all of the options before executing the commands (options start with "-", commands doesn't
-while [[ ${1:0:1} == "-" ]];do
+while [[ ${1:0:1} == "-" && $# -gt 0 ]];do
 	case "$1" in
 		"-t" | "--type")
 			assignType "$2" # The value after the argument is the value we want to give to this argument
