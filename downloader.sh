@@ -1,6 +1,8 @@
 #!/bin/bash
 
+##########################################################################
 #### Little script to symplify music download with Streamrip and OrpheusDL
+##########################################################################
 
 # Variables to use ANSI color codes while keeping the code readable
 GREEN="\e[32m"
@@ -9,6 +11,8 @@ YELLOW="\e[33m"
 RESET="\e[0m"
 
 # Variables private to the script
+# Possible values for modules (they're here because we print this array on OrpheusDL help
+possibleModules=("beatport" "bugs" "deezer" "idagio" "jiosaavn" "kkbox" "napster" "nugs" "qobuz" "soundcloud" "tidal")
 toDownload=() # Variable that will store the list of things to download
 # Dedicated to store the state of the download directory before any download happen, so we know which files the download added
 # Will be useful if the user requests to move the files after download or to modify them (eg with zfill)
@@ -22,7 +26,6 @@ STREAMRIPDIR="$PWD/streamrip" # directory where streamrip script is located
 DEST="" # Destination to put the downloaded files at the end
 ORPHEUSVENV="./.venv-orpheus" # Venv for orpheusdl
 STREAMRIPVENV="./venv-streamrip" # Venv for streamrip
-
 
 ##################
 # GLOBAL FUNCTIONS
@@ -49,10 +52,20 @@ checkRelative() {
 	echo "$path" # We use echo to return the new value
 }
 
+# Check is a directory exists, returns an error and exists if it doesn't, does nothing otherwise
+# The first argument given to the function is the directory to check, the second is how to name the directory in the error message
+checkDirectory () {
+	directory="$(checkRelative "$1")" # Just in case
+	if [[ ! -d "$directory" ]]; then
+		echo -e "${RED}ERROR:${RESET} The directory given as $2 doesn't exists: ${YELLOW}$directory${RESET}"
+		exit 1
+	fi
+}
 
 # Function to let user choose the type of the content to download
+# Argument is the type of media the user gave
 assignType () {
-	userType=$(echo "$1" | tr [A-Z] [a-z]) # We make the type provided by the user lowercase, just in case
+	userType=$(echo "$1" | tr "\[A-Z\]" "\[a-z\]") # We make the type provided by the user lowercase, just in case
 	# Type must be album, artist, label, track
 	# For this we create a string that contains the possible arguments, separated by a space, and we compare it to a regex containing the type given by the user
 	if [[ "album artist label track" =~ (^|[[:space:]])$userType(^|[[:space:]]) ]]; then
@@ -79,6 +92,7 @@ assignDest () {
 }
 
 # Function to save the state of the download directory before downloads happen
+# Argument given to the function is a directory
 backupDir () {
 	# The argument to give to the function is the directory were the downloads are put
 	for i in "$1"/*; do
@@ -105,6 +119,16 @@ assignVenv () {
 	fi
 }
 
+# Check if an element is already in the toDownload array
+# Argument given is the element we want to check if it's in the array
+checkIfToDownload() {
+	if [[ "${toDownload[*]}" =~ (^|[[:space:]])"$1"(^|[[:space:]]) ]]; then
+		echo 0 # We return 0 if the value is already in the table
+	else
+		echo 1 # Otherwise we return 1
+	fi
+}
+
 # Function to add albums to download interactively
 # Prompts the user to add an album, and exit when user input is empty
 interactiveAddElements () {
@@ -120,14 +144,17 @@ interactiveAddElements () {
 
 # Function to add elements, automatically choosing to do it interactively or not
 addElements () {
-	# If no value for download (next element is an argument, starting with a "-", or no value is given after it at all), trigger interactive element adding
+	# If no value for download (next element is an argument starting with a "-", or no value is given after it at all), trigger interactive element adding
 	if [[ "${2:0:1}" == "-" || $# == 0 ]]; then
 		interactiveAddElements
 	# Else, parse every element until it's an argument
 	else
 		# While the next element isn't an argument (aka doesn't starts with "-"), add the element to the array and shift elements to the left
 		while [[ "${1:0:1}" != "-" && $# -gt 0 ]]; do
-			toDownload+=("$1")
+			# We add the element only if it's not already in the array
+			if [[ $(checkIfToDownload "$1") == 1 ]]; then
+				toDownload+=("$1")
+			fi
 			shift
 		done
 	fi
@@ -145,8 +172,8 @@ convertElements () {
 				newToDownload+=("${i}")
 			fi
 		done
+		toDownload=("${newToDownload[@]}") # We replace toDownload with the new values
 	fi
-	toDownload=("${newToDownload[@]}") # We replace toDownload with the new values
 }
 
 # Useful links for music piracy
@@ -175,6 +202,7 @@ ${RED}Usage:${RESET} $0 [OPTIONS] COMMAND
     ${GREEN}-m, --move${RESET}		Where to move the files after download. If unset, files won't be moved.
     ${GREEN}-v, --venv${RESET}		Path to the virtual environment
     ${GREEN}-t, --type${RESET}		Type of the media you want to download. ${RED}Required only if you want to download from Qobuz.${RESET}
+    ${GREEN}-z, --zfill${RESET}		Add a zero before each downloaded track number if needed
   
   ${RED}Commands:${RESET}
     ${GREEN}streamrip${RESET}	Actions related to Streamrip
@@ -194,12 +222,10 @@ orpheusHelp () {
 ${RED}Usage:${RESET} $0 orpheus [OPTIONS]
 
   ${RED}Options:${RESET}
-    ${GREEN}--module${RESET}		Install the OrpheusDL modules located at the given Github link
+    ${GREEN}--module${RESET}		Install the wanted OrpheusDL module (supported: ${YELLOW}${possibleModules[*]}${RESET})
     ${GREEN}-h, --help${RESET}		Show this message and exit
     ${GREEN}-d, --download${RESET}	${YELLOW}Content${RESET} to download, each element being separated by a space. If ${YELLOW}unset${RESET}, switch to interactive download mode.
     ${GREEN}-i, --install${RESET}	Install OrpheusDL & creates a python virtualenv at $VENV
-    ${GREEN}-p, --platform${RESET}	Platform you want to download from
-    ${GREEN}-z, --zfill${RESET}		Add a zero before each track number if needed
 
 
   ${RED}Definitions:${RESET}
@@ -208,44 +234,116 @@ ${RED}Usage:${RESET} $0 orpheus [OPTIONS]
 "
 }
 
+# Function to check if the directory given as orpheus directory contains orpheus.py
+# Argument given to the function is the directory to check
+checkOrpheusDir () {
+	userDir="$(checkRelative "$1")" # We save the user-provided directory in a variable, and we clearly make it relative if needed
+	checkDirectory "$userDir" "OrpheusDL directory" # First of all we check if the user-provided directory exists
+	# Returns an error & exit if orpheus.py cannot be found in the directory (do nothing otherwise)
+	if [[ ! -e "$userDir/orpheus.py" ]]; then
+		echo -e "${RED}ERROR:${RESET} The directory you gave for OrpheusDL doesn't contain orpheus.py: ${YELLOW}${userDir}${RESET}"
+		exit 1
+	fi
+}
+
 # Function to download items with OrpheusDL
 downloadOrpheus () {
 	previousDir="$PWD" # We save the directory the program is executed from
-	cd "$ORPHEUSDIR" # Enter the directory where OrpheusDL is stored, or exit with an error
+	checkOrpheusDir "$ORPHEUSDIR" # We check if given OrpheusDL directory is valid before entering it
+	# Entering into OrpheusDL directory, exit with an error in case something wrong happens (you cant be too careful i guess)
+	cd "$ORPHEUSDIR" || (echo -e "${RED}ERROR:${RESET} Can't cd into the directory were OrpheusDL is supposed to be"; exit 1)
 	source "$VENV" # Source the virtual environment
 	for i in "${toDownload[@]}"; do
 		python "$ORPHEUSDIR" "$i"
 	done
 	# going back to where the command has been launch; go to home if it fails; exit with an error if even this fails
 	cd "$previousDir" ||
-		echo -e "${YELLOW}Warning${RESET}: Couldn't find the directory you launched the command from, cd'ing in $HOME"; cd "$HOME" ||
-		echo -e "${RED}ERROR${RESET}: Can't find nor the directory you were in, nor an home directory"; exit 1 
+		(echo -e "${YELLOW}Warning${RESET}: Can't find the directory you launched the command from, cd'ing in $HOME"; cd "$HOME") ||
+		(echo -e "${RED}ERROR${RESET}: Can't find nor the directory you were in, nor an home directory"; exit 1)
 }
 
 # Function to install OrpheusDL
 installOrpheus () {
 	echo -e "${GREEN}Cloning OrpheusDL...${RESET} \n"
-	git clone "https://github.com/OrfiTeam/OrpheusDL"
+	git clone "https://github.com/OrfiTeam/OrpheusDL $ORPHEUSDIR"
 	checkError "Can't clone OrpheusDL github repository. Maybe check your internet connection?"
-	echo -e "${GREEN}Creating the python virtual environment for OrpheusDL...${RESET} \n"
+	echo -e "${GREEN}Creating the python virtual environment for OrpheusDL at ${YELLOW}${VENV}${YELLOW}...${RESET} \n"
 	python -m venv "$VENV"
 	checkError "Can't create the python virtual environment. Check python is correctly installed."
 	echo -e "${GREEN}Installing OrpheusDL requirements...${RESET}"
-	source "$VENV/bin/activate" # Sourcing the virtual environment
+	# Sourcing the virtual environment, exit with an error if something wrong happens
+	source "$VENV/bin/activate" || (echo -e "${RED}ERROR:${RESET} Can't activate the virtual environment. Check your python installation."; exit 1)
 	cd OrpheusDL && pip install -r requirements.txt && python3 orpheus.py settings refresh && cd ..
-	checkError "Can't install OrpheusDL requirements. Check for your internet, your python installation, and if ${GREEN}${ORPHEUSDIR}${RESET} is the correct OrpeusDL location"
+	checkError "Can't install OrpheusDL requirements. Check for your internet, your python installation, and if ${GREEN}${ORPHEUSDIR}${RESET} is the correct OrpheusDL location"
 	deactivate # Deactivating the virtual environment
 	echo -e "\n ${GREEN}Done!${RESET}"
 }
 
-#  Download content of toDownload with OrpheusDL
-downloadOrpheus () {
-	# Going into OrpheusDL directory or exit with an error if invalid directory
-	cd "$ORPHEUSDIR" || echo -e "${RED}ERROR${RESET}: The directory you gave for for OrpheusDL is invalid"
-	source "$VENV/bin/activate" # Source the venv
-	for i in "${toDownload[@]}"; do
-		# Using Orpheus on every content of toDownload
-		python orpheus.py "$i"
+# Function to install OrpheusDL modules
+# Takes the modules the user wants to download as arguments
+orpheusModules () {
+	checkorpheusDir "$ORPHEUSDIR" # We check orpheus directory given by the user
+	# Entering into OrpheusDL directory, exit with an error in case something wrong happens (you cant be too careful i guess)
+	cd "$ORPHEUSDIR" || (echo -e "${RED}ERROR:${RESET} Can't cd into the directory were OrpheusDL is supposed to be"; exit 1)
+	# Before installing modules, we will build an array that stores the modules that are already installed
+	installedModules=()
+	# We loop over every possible module name
+	for i in "${possibleModules[@]}"; do
+		# We simply check if the module has a folder in OrpheusDL modules folder, and if it's not empty
+		if [[ -d "./modules/$i" && -e "./modules/$i/*" ]]; then
+			installedModules+=("$i")
+		fi
+	done
+	modules=() # Will contain the modules to download
+	# We parse until there is no module left to download (no more elements, or next element is an argument)
+	# We always analyze only the first argument (add the end we shift elements to the left)
+	while [[ $# -gt 0 && ${1:0:1} != "-" ]]; do
+		currentModule="$(echo "$1" | tr "\[A-Z\]" "\[a-z\]")" # We make module name lowercase, just in case
+		# If the module is already installed, we don't reinstall it
+		if [[ "${installedModules[*]}" =~ (^|[[:space:]])"$currentModule"(^|[[:space:]]) ]]; then
+			echo "${YELLOW}Warning:${RESET} Module already installed. Passing..."
+		# Else, we add the module to the download list only if it's a valid value
+		elif [[ "${possibleModules[*]}" =~ (^|[[:space:]])"$currentModule"(^|[[:space:]]) ]]; then
+			modules+=("$currentModule")
+		# Otherwise, we exit with an error
+		else
+			echo -e "${RED}ERROR:${RESET} Invalid module name: ${YELLOW}${currentModule}${RESET}"
+			exit 1
+		fi
+		shift
+	done
+	# Now that we have a list of valid module names, we simply loop over the array and download the wanted ones
+	for m in "${modules[@]}"; do
+		if [[ "$m" == "deezer" ]]; then
+			url="heKVT/orpheusdl-deezer"
+		elif [[ "$m" == "beatport" ]]; then
+			url="Dniel97/orpheusdl-beatport"
+		elif [[ "$m" == "bugs" ]]; then
+			url="Dniel97/orpheusdl-bugsmusic"
+		elif [[ "$m" == "idagio" ]]; then
+			url="Dniel97/orpheusdl-idagio"
+		elif [[ "$m" == "jiosaavn" ]]; then
+			url="bunnykek/orpheusdl-jiosaavn"
+		elif [[ "$m" == "kkbox" ]]; then
+			url="uhwot/orpheusdl-kkbox"
+		elif [[ "$m" == "napster" ]]; then
+			url="OrfiDev/orpheusdl-napster"
+		elif [[ "$m" == "nugs" ]]; then
+			url="Dniel97/orpheusdl-nugs"
+		elif [[ "$m" == "qobuz" ]]; then
+			url="TheKVT/orpheusdl-qobuz"
+		elif [[ "$m" == "soundcloud" ]]; then
+			url="OrfiDev/orpheusdl-soundcloud"
+		elif [[ "$m" == "tidal" ]]; then
+			url="Dniel97/orpheusdl-tidal"
+		fi
+		# Now that we know the end of the github url, we can git clone the module
+		echo -e "${GREEN}Cloning OrpheusDL's $m module...${RESET}"
+		git clone "https://github.com/$url ./modules/$m" # Clone the module in the modules folder
+		checkError "Can't clone OrpheusDL's $m module github repository. Maybe check your internet connection?"
+		echo -e "${GREEN}Updating OrpheusDL configuration...${RESET}"
+		python orpheus.py
+		checkError "Can't update orpheus.py settings. Check your OrpheusDL installation"
 	done
 }
 
@@ -256,10 +354,11 @@ orpheus () {
 		orpheusHelp
 		exit 0
 	fi
-	# If any argument is "-h" or "--help", or if there is an unrecognized argument, print help and exit without doing anything
+	# Choose weather to print help or not regarding of the arguments
 	for i in "$@"; do
 		# Arguments starts by "-" so we check only elements that starts by "-"
 		if [[ "${i:0:1}" == "-" ]]; then
+			# If any argument is "-h" or "--help", or if there is an unrecognized argument, print help and exit without doing anything
 			if [[ "--help -h" =~ (^|[[:space:]])$i(^|[[:space:]]) || ! "-p --platform -d --download -m --module" =~ (^|[[:space:]])$i(^|[[:space:]]) ]]; then
 				orpheusHelp
 				exit 0
@@ -339,6 +438,10 @@ streamrip () {
 	done
 }
 
+################
+# EXECUTION ZONE
+################
+
 # Parse all of the options before executing the commands (options start with "-", commands doesn't)
 while [[ ${1:0:1} == "-" && $# -gt 0 ]];do
 	case "$1" in
@@ -346,7 +449,7 @@ while [[ ${1:0:1} == "-" && $# -gt 0 ]];do
 			assignDest "$2"
 			;;
 		"-p" | "--platform")
-			PLATFORM="$(echo $2 | tr [A-Z] [a-z])" # We make user input lowercase, just in case
+			PLATFORM="$(echo "$2" | tr "\[A-Z\]" "\[a-z\]")" # We make user input lowercase, just in case
 			;;
 		"-t" | "--type")
 			assignType "$2" # The value after the argument is the value we want to give to this argument
@@ -364,7 +467,7 @@ done
 case "$1" in
 	"o" | "orpheus")
 		orpheus "${@:2}" # We pass all the array, without the command and everything that's before
-		downloadOrpheus # When everything got parsed, we can download with OrpheusDL
+		downloadOrpheus # We launch downloading after all arguments got parsed
 		;;
 	"s" | "streamrip")
 		streamrip "${@:2}" # Same as for Orpheus
