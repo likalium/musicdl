@@ -8,12 +8,13 @@ RED="\e[31m"
 YELLOW="\e[33m"
 RESET="\e[0m"
 
-##################
-# GLOBAL FUNCTIONS
-##################
-
-# VARIABLES
+# Variables private to the script
 toDownload=() # Variable that will store the list of things to download
+# Dedicated to store the state of the download directory before any download happen, so we know which files the download added
+# Will be useful if the user requests to move the files after download or to modify them (eg with zfill)
+backupDirState=()
+
+# ENV VARIABLES
 PLATFORM="qobuz" # Streaming platform to download music from
 TYPE="album" # Media type. Only used for qobuz
 ORPHEUSDIR="$PWD/OrpheusDL" # directory where orpheusdl script is located
@@ -21,6 +22,11 @@ STREAMRIPDIR="$PWD/streamrip" # directory where streamrip script is located
 DEST="" # Destination to put the downloaded files at the end
 ORPHEUSVENV="./.venv-orpheus" # Venv for orpheusdl
 STREAMRIPVENV="./venv-streamrip" # Venv for streamrip
+
+
+##################
+# GLOBAL FUNCTIONS
+##################
 
 # If last command exit status was an error, print the wanted error message & exit
 checkError() {
@@ -32,6 +38,17 @@ checkError() {
 		exit 1
 	fi
 }
+
+# If the path given is a relative path but doesn't start with "./", we add it to avoid ambiguity
+# Parameter given to the extension is the path to analyze
+checkRelative() {
+	path=$1 # We save the path so we can easily modify it
+	if [[ "${path:0:2}" != "./" && "${path:0:1}" != "/" ]]; then
+		path="./$path"
+	fi
+	echo "$path" # We use echo to return the new value
+}
+
 
 # Function to let user choose the type of the content to download
 assignType () {
@@ -47,21 +64,44 @@ assignType () {
 	fi
 }
 
-# Function to let the user choose the path to the virtual environment
-assignVenv () {
-	userVenv=$1 # We save the venv provided by the user to easily apply modifications to it
-	# If VENV path doesn't start with "./", we add it (because it's prettier, and avoids confusion)
-	# BUT we dont add it if it's an absolute path (starts with "/")
-	if [[ "${userVenv:0:2}" != "./" && "${userVenv:0:1}" != "/" ]]; then
-		userVenv="./$1"
-	fi
-	# We check that the path exists
-	if [[ -e "$1" ]]; then
-		VENV="$userVenv"
-	# We output with an error if the path doesn't exists
+# Function to let the user choose the directory to move their files after download completed
+# Argument given to the function is the destination path for files
+assignDest () {
+	userDest="$(checkRelative "$1")" # We transform the path given into a clear relative path if needed (because it's prettier, and avoids confusion)
+	# If the destination exists, we use it
+	if [[ -e "$userDest" ]]; then
+		DEST="$userDest"
+	# If the destination doesn't exists, we output an error then exit
 	else
+		echo -e "${RED}ERROR${RESET}: The directory you gave to put your files in after download doesn't exists: ${YELLOW}${userDest}${RESET}"
+		exit 1
+	fi
+}
+
+# Function to save the state of the download directory before downloads happen
+backupDir () {
+	# The argument to give to the function is the directory were the downloads are put
+	for i in "$1"/*; do
+		backupDirState+=("$i")
+	done
+}
+
+
+# Function to let the user choose the path to the virtual environment
+# Argument given to the function is a path to a VENV
+assignVenv () {
+	userVenv="$(checkRelative "$1")" # We make the path into a clear relative path if needed
+	# We output an error if the path doesn't exists
+	if [[ ! -e "$userVenv" ]]; then
 		echo -e "${RED}ERROR${RESET}: The path you gave for the python virtual environment doesn't exists: ${YELLOW}$userVenv${RESET}"
 		exit 1
+	# We output an error if the file doesn't contain the file to activate the virtual environment
+	elif [[ ! -e "$userVenv/bin/activate" ]]; then
+		echo -e "${RED}ERROR${RESET}: The path you gave is invalid for a virtual environment: It doesn't contain the file ${YELLOW}$userVenv/bin/activate${RESET}"
+		exit 1
+	# Otherwise we make the path given by the user a valid path
+	else
+		VENV="$userVenv"
 	fi
 }
 
@@ -80,7 +120,7 @@ interactiveAddElements () {
 
 # Function to add elements, automatically choosing to do it interactively or not
 addElements () {
-	# If no value for download (next element is an argument, starting with a "-", or no value is given at all), trigger interactive element adding
+	# If no value for download (next element is an argument, starting with a "-", or no value is given after it at all), trigger interactive element adding
 	if [[ "${2:0:1}" == "-" || $# == 0 ]]; then
 		interactiveAddElements
 	# Else, parse every element until it's an argument
@@ -96,7 +136,7 @@ addElements () {
 # Function to convert elements into links (for example if they're qobuz ids)
 convertElements () {
 	newToDownload=() # We create an array that will store the new values
-	if [[ $PLATFORM == "qobuz" ]]; then
+	if [[ "$PLATFORM" == "qobuz" ]]; then
 		for i in "${toDownload[@]}"; do
 			# If element doesn't start with "https" then it's not a link, so it's an id
 			if [[ "${i:0:5}" != "https" ]]; then
@@ -131,8 +171,9 @@ ${RED}Usage:${RESET} $0 [OPTIONS] COMMAND
 	
   ${RED}Options:${RESET}
     ${GREEN}-h, --help${RESET}		Show this message and exit (you can use it after a command to see the options for the command)
-    ${GREEN}-v, --venv${RESET}		Path to the virtual environment
     ${GREEN}-p, --platform${RESET}	Platform you want to download from
+    ${GREEN}-m, --move${RESET}		Where to move the files after download. If unset, files won't be moved.
+    ${GREEN}-v, --venv${RESET}		Path to the virtual environment
     ${GREEN}-t, --type${RESET}		Type of the media you want to download. ${RED}Required only if you want to download from Qobuz.${RESET}
   
   ${RED}Commands:${RESET}
@@ -157,7 +198,6 @@ ${RED}Usage:${RESET} $0 orpheus [OPTIONS]
     ${GREEN}-h, --help${RESET}		Show this message and exit
     ${GREEN}-d, --download${RESET}	${YELLOW}Content${RESET} to download, each element being separated by a space. If ${YELLOW}unset${RESET}, switch to interactive download mode.
     ${GREEN}-i, --install${RESET}	Install OrpheusDL & creates a python virtualenv at $VENV
-    ${GREEN}-m, --move${RESET}		Where to move the files after download. If unset, files won't be moved.
     ${GREEN}-p, --platform${RESET}	Platform you want to download from
     ${GREEN}-z, --zfill${RESET}		Add a zero before each track number if needed
 
@@ -178,8 +218,8 @@ downloadOrpheus () {
 	done
 	# going back to where the command has been launch; go to home if it fails; exit with an error if even this fails
 	cd "$previousDir" ||
-		echo "Couldn't find the directory you launched the command from, cd'ing in $HOME"; cd "$HOME" ||
-		echo "${RED}ERROR${RESET}: Can't find nor the directory you were in, nor an home directory"; exit 1 
+		echo -e "${YELLOW}Warning${RESET}: Couldn't find the directory you launched the command from, cd'ing in $HOME"; cd "$HOME" ||
+		echo -e "${RED}ERROR${RESET}: Can't find nor the directory you were in, nor an home directory"; exit 1 
 }
 
 # Function to install OrpheusDL
@@ -198,7 +238,18 @@ installOrpheus () {
 	echo -e "\n ${GREEN}Done!${RESET}"
 }
 
-# Main command (like a hub) for OrpheusDL related commands
+#  Download content of toDownload with OrpheusDL
+downloadOrpheus () {
+	# Going into OrpheusDL directory or exit with an error if invalid directory
+	cd "$ORPHEUSDIR" || echo -e "${RED}ERROR${RESET}: The directory you gave for for OrpheusDL is invalid"
+	source "$VENV/bin/activate" # Source the venv
+	for i in "${toDownload[@]}"; do
+		# Using Orpheus on every content of toDownload
+		python orpheus.py "$i"
+	done
+}
+
+# Main command (like a hub) for OrpheusDL related argument parsing
 orpheus () {
 	# If no arguments at all, print help and exit
 	if [[ $# == 0 ]]; then
@@ -264,7 +315,7 @@ installStreamrip () {
 	echo -e "${GREEN}\nDone!${RESET}"
 }
 
-# Main command (like a hub) for Streamrip related commands
+# Main command (like a hub) for Streamrip related argument parsing
 streamrip () {
 	# If no arguments at all, we print help
 	if  [[ $# == 0 ]]; then
@@ -288,17 +339,21 @@ streamrip () {
 	done
 }
 
-# Parse all of the options before executing the commands (options start with "-", commands doesn't
+# Parse all of the options before executing the commands (options start with "-", commands doesn't)
 while [[ ${1:0:1} == "-" && $# -gt 0 ]];do
 	case "$1" in
+		"-m" | "--move"):
+			assignDest "$2"
+			;;
+		"-p" | "--platform")
+			PLATFORM="$(echo $2 | tr [A-Z] [a-z])" # We make user input lowercase, just in case
+			;;
 		"-t" | "--type")
 			assignType "$2" # The value after the argument is the value we want to give to this argument
 			;;
 		"-v" | "--venv")
 			assignVenv "$2"
 			;;
-		"-p" | "--platform")
-			PLATFORM="$(echo $2 | tr [A-Z] [a-z])" # We make user input lowercase, just in case
 	esac
 	# We shift two time to remove the argument and its value
 	shift
@@ -309,6 +364,7 @@ done
 case "$1" in
 	"o" | "orpheus")
 		orpheus "${@:2}" # We pass all the array, without the command and everything that's before
+		downloadOrpheus # When everything got parsed, we can download with OrpheusDL
 		;;
 	"s" | "streamrip")
 		streamrip "${@:2}" # Same as for Orpheus
