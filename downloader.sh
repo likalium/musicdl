@@ -31,15 +31,12 @@ STREAMRIPVENV="./venv-streamrip" # Venv for streamrip
 # GLOBAL FUNCTIONS
 ##################
 
-# If last command exit status was an error, print the wanted error message & exit
-checkError() {
-	errorCode=$?
-	if errorCode != 0; then
-		echo "
-		${RED}ERROR${RESET} (code $errorCode): $1
-		"
-		exit 1
-	fi
+# Output an error with the wanted error message then exit
+echoError() {
+	echo -e "
+${RED}ERROR${RESET}: $1
+	"
+	exit 1
 }
 
 # If the path given is a relative path but doesn't start with "./", we add it to avoid ambiguity
@@ -68,12 +65,11 @@ assignType () {
 	userType=$(echo "$1" | tr "\[A-Z\]" "\[a-z\]") # We make the type provided by the user lowercase, just in case
 	# Type must be album, artist, label, track
 	# For this we create a string that contains the possible arguments, separated by a space, and we compare it to a regex containing the type given by the user
-	if [[ "album artist label track" =~ (^|[[:space:]])$userType(^|[[:space:]]) ]]; then
+	if [[ "album artist label track" =~ (^|[[:space:]])$userType($|[[:space:]]) ]]; then
 		TYPE=$userType
 	# If type is wrong, we exit with an error 
 	else
-		echo -e "${RED}ERROR${RESET}: Invalid type argument: ${YELLOW}$1${RESET}"
-		exit 1
+		echoError "Invalid type argument: ${YELLOW}$1${RESET}"
 	fi
 }
 
@@ -86,8 +82,7 @@ assignDest () {
 		DEST="$userDest"
 	# If the destination doesn't exists, we output an error then exit
 	else
-		echo -e "${RED}ERROR${RESET}: The directory you gave to put your files in after download doesn't exists: ${YELLOW}${userDest}${RESET}"
-		exit 1
+		echoError "The directory you gave to put your files in after download doesn't exists: ${YELLOW}${userDest}${RESET}"
 	fi
 }
 
@@ -107,12 +102,10 @@ assignVenv () {
 	userVenv="$(checkRelative "$1")" # We make the path into a clear relative path if needed
 	# We output an error if the path doesn't exists
 	if [[ ! -e "$userVenv" ]]; then
-		echo -e "${RED}ERROR${RESET}: The path you gave for the python virtual environment doesn't exists: ${YELLOW}$userVenv${RESET}"
-		exit 1
+		echoError "The path you gave for the python virtual environment doesn't exists: ${YELLOW}$userVenv${RESET}"
 	# We output an error if the file doesn't contain the file to activate the virtual environment
 	elif [[ ! -e "$userVenv/bin/activate" ]]; then
-		echo -e "${RED}ERROR${RESET}: The path you gave is invalid for a virtual environment: It doesn't contain the file ${YELLOW}$userVenv/bin/activate${RESET}"
-		exit 1
+		echoError "The path you gave is invalid for a virtual environment: It doesn't contain the file ${YELLOW}$userVenv/bin/activate${RESET}"
 	# Otherwise we make the path given by the user a valid path
 	else
 		VENV="$userVenv"
@@ -122,7 +115,7 @@ assignVenv () {
 # Check if an element is already in the toDownload array
 # Argument given is the element we want to check if it's in the array
 checkIfToDownload() {
-	if [[ "${toDownload[*]}" =~ (^|[[:space:]])"$1"(^|[[:space:]]) ]]; then
+	if [[ "${toDownload[*]}" =~ ($|[[:space:]])"$1"($|[[:space:]]) ]]; then
 		echo 0 # We return 0 if the value is already in the table
 	else
 		echo 1 # Otherwise we return 1
@@ -241,8 +234,7 @@ checkOrpheusDir () {
 	checkDirectory "$userDir" "OrpheusDL directory" # First of all we check if the user-provided directory exists
 	# Returns an error & exit if orpheus.py cannot be found in the directory (do nothing otherwise)
 	if [[ ! -e "$userDir/orpheus.py" ]]; then
-		echo -e "${RED}ERROR:${RESET} The directory you gave for OrpheusDL doesn't contain orpheus.py: ${YELLOW}${userDir}${RESET}"
-		exit 1
+		echoError "The directory you gave for OrpheusDL doesn't contain orpheus.py: ${YELLOW}${userDir}${RESET}"
 	fi
 }
 
@@ -250,31 +242,29 @@ checkOrpheusDir () {
 downloadOrpheus () {
 	previousDir="$PWD" # We save the directory the program is executed from
 	checkOrpheusDir "$ORPHEUSDIR" # We check if given OrpheusDL directory is valid before entering it
+	source "$VENV/bin/activate" # Source the virtual environment
 	# Entering into OrpheusDL directory, exit with an error in case something wrong happens (you cant be too careful i guess)
 	cd "$ORPHEUSDIR" || (echo -e "${RED}ERROR:${RESET} Can't cd into the directory were OrpheusDL is supposed to be"; exit 1)
-	source "$VENV" # Source the virtual environment
 	for i in "${toDownload[@]}"; do
 		python "$ORPHEUSDIR" "$i"
 	done
 	# going back to where the command has been launch; go to home if it fails; exit with an error if even this fails
 	cd "$previousDir" ||
 		(echo -e "${YELLOW}Warning${RESET}: Can't find the directory you launched the command from, cd'ing in $HOME"; cd "$HOME") ||
-		(echo -e "${RED}ERROR${RESET}: Can't find nor the directory you were in, nor an home directory"; exit 1)
+		echoError "Can't find nor the directory you were in, nor an home directory"
 }
 
 # Function to install OrpheusDL
 installOrpheus () {
 	echo -e "${GREEN}Cloning OrpheusDL...${RESET} \n"
-	git clone "https://github.com/OrfiTeam/OrpheusDL $ORPHEUSDIR"
-	checkError "Can't clone OrpheusDL github repository. Maybe check your internet connection?"
+	git clone "https://github.com/OrfiTeam/OrpheusDL" "$ORPHEUSDIR" || echoError "Can't clone OrpheusDL github repository. Maybe check your internet connection?"
 	echo -e "${GREEN}Creating the python virtual environment for OrpheusDL at ${YELLOW}${VENV}${YELLOW}...${RESET} \n"
-	python -m venv "$VENV"
-	checkError "Can't create the python virtual environment. Check python is correctly installed."
+	python -m venv "$VENV" || echoError "Can't create the python virtual environment. Check python is correctly installed."
 	echo -e "${GREEN}Installing OrpheusDL requirements...${RESET}"
 	# Sourcing the virtual environment, exit with an error if something wrong happens
-	source "$VENV/bin/activate" || (echo -e "${RED}ERROR:${RESET} Can't activate the virtual environment. Check your python installation."; exit 1)
-	cd OrpheusDL && pip install -r requirements.txt && python3 orpheus.py settings refresh && cd ..
-	checkError "Can't install OrpheusDL requirements. Check for your internet, your python installation, and if ${GREEN}${ORPHEUSDIR}${RESET} is the correct OrpheusDL location"
+	source "$VENV/bin/activate" || echoError "Can't activate the virtual environment. Check your python installation."
+	(cd OrpheusDL && pip install -r requirements.txt && python orpheus.py settings refresh && cd ..) ||
+	echoError "Can't install OrpheusDL requirements. Check for your internet, your python installation, and if ${GREEN}${ORPHEUSDIR}${RESET} is the correct OrpheusDL location"
 	deactivate # Deactivating the virtual environment
 	echo -e "\n ${GREEN}Done!${RESET}"
 }
@@ -282,9 +272,9 @@ installOrpheus () {
 # Function to install OrpheusDL modules
 # Takes the modules the user wants to download as arguments
 orpheusModules () {
-	checkorpheusDir "$ORPHEUSDIR" # We check orpheus directory given by the user
+	checkOrpheusDir "$ORPHEUSDIR" # We check orpheus directory given by the user
 	# Entering into OrpheusDL directory, exit with an error in case something wrong happens (you cant be too careful i guess)
-	cd "$ORPHEUSDIR" || (echo -e "${RED}ERROR:${RESET} Can't cd into the directory were OrpheusDL is supposed to be"; exit 1)
+	cd "$ORPHEUSDIR" || echoError "Can't cd into the directory were OrpheusDL is supposed to be"
 	# Before installing modules, we will build an array that stores the modules that are already installed
 	installedModules=()
 	# We loop over every possible module name
@@ -300,15 +290,14 @@ orpheusModules () {
 	while [[ $# -gt 0 && ${1:0:1} != "-" ]]; do
 		currentModule="$(echo "$1" | tr "\[A-Z\]" "\[a-z\]")" # We make module name lowercase, just in case
 		# If the module is already installed, we don't reinstall it
-		if [[ "${installedModules[*]}" =~ (^|[[:space:]])"$currentModule"(^|[[:space:]]) ]]; then
+		if [[ "${installedModules[*]}" =~ (^|[[:space:]])"$currentModule"($|[[:space:]]) ]]; then
 			echo "${YELLOW}Warning:${RESET} Module already installed. Passing..."
 		# Else, we add the module to the download list only if it's a valid value
-		elif [[ "${possibleModules[*]}" =~ (^|[[:space:]])"$currentModule"(^|[[:space:]]) ]]; then
+		elif [[ "${possibleModules[*]}" =~ (^|[[:space:]])"$currentModule"($|[[:space:]]) ]]; then
 			modules+=("$currentModule")
 		# Otherwise, we exit with an error
 		else
-			echo -e "${RED}ERROR:${RESET} Invalid module name: ${YELLOW}${currentModule}${RESET}"
-			exit 1
+			echoError "Invalid module name: ${YELLOW}${currentModule}${RESET}"
 		fi
 		shift
 	done
@@ -339,11 +328,11 @@ orpheusModules () {
 		fi
 		# Now that we know the end of the github url, we can git clone the module
 		echo -e "${GREEN}Cloning OrpheusDL's $m module...${RESET}"
-		git clone "https://github.com/$url ./modules/$m" # Clone the module in the modules folder
-		checkError "Can't clone OrpheusDL's $m module github repository. Maybe check your internet connection?"
+		# Clone the module in the modules folder
+		git clone --recurse-submodules "https://github.com/$url" "./modules/$m" ||
+			echoError "Can't clone OrpheusDL's $m module github repository. Maybe check your internet connection?"
 		echo -e "${GREEN}Updating OrpheusDL configuration...${RESET}"
-		python orpheus.py
-		checkError "Can't update orpheus.py settings. Check your OrpheusDL installation"
+		python orpheus.py || echoError "Can't update orpheus.py settings. Check your OrpheusDL installation"
 	done
 }
 
@@ -359,20 +348,28 @@ orpheus () {
 		# Arguments starts by "-" so we check only elements that starts by "-"
 		if [[ "${i:0:1}" == "-" ]]; then
 			# If any argument is "-h" or "--help", or if there is an unrecognized argument, print help and exit without doing anything
-			if [[ "--help -h" =~ (^|[[:space:]])$i(^|[[:space:]]) || ! "-p --platform -d --download -m --module" =~ (^|[[:space:]])$i(^|[[:space:]]) ]]; then
+			if [[ "--help -h" =~ (^|[[:space:]])$i($|[[:space:]]) || ! "-i --install -d --download --module" =~ (^|[[:space:]])$i($|[[:space:]]) ]]; then
 				orpheusHelp
 				exit 0
 			fi
 		fi
 	done
+	# If VENV is unset, call it .venv-orpheus
+	if [[ "$VENV" == "" ]]; then
+		VENV="./.venv-orpheus"
+	fi
 	# If no help asked, we parse the arguments one by one. We parse until there is no argument left
 	while [[ $# -gt 0 ]]; do
 		case "$1" in
-			"-d" | "--download" | "--dl")
+			"-d" | "--download")
 				addElements "${@:2}" # We use everything after the -d/--download/--dl as an argument to addElement
 				;;
 			"-i" | "--install" )
 				installOrpheus
+				;;
+			"--module")
+				orpheusModules "${@:2}" # We pass all after the -m/--module as arguments
+				;;
 		esac
 		# We do a simple shift, to remove the argument we just treated
 		shift
@@ -467,7 +464,10 @@ done
 case "$1" in
 	"o" | "orpheus")
 		orpheus "${@:2}" # We pass all the array, without the command and everything that's before
-		downloadOrpheus # We launch downloading after all arguments got parsed
+		# We launch downloading after all arguments got parsed and if needed
+		if [[ ${#toDownload[@]} -gt 0 ]]; then
+			downloadOrpheus 
+		fi
 		;;
 	"s" | "streamrip")
 		streamrip "${@:2}" # Same as for Orpheus
