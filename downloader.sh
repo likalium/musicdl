@@ -246,7 +246,7 @@ downloadOrpheus () {
 	# Entering into OrpheusDL directory, exit with an error in case something wrong happens (you cant be too careful i guess)
 	cd "$ORPHEUSDIR" || (echo -e "${RED}ERROR:${RESET} Can't cd into the directory were OrpheusDL is supposed to be"; exit 1)
 	for i in "${toDownload[@]}"; do
-		python "$ORPHEUSDIR" "$i"
+		python "orpheus.py" "$i"
 	done
 	# going back to where the command has been launch; go to home if it fails; exit with an error if even this fails
 	cd "$previousDir" ||
@@ -363,6 +363,7 @@ orpheus () {
 		case "$1" in
 			"-d" | "--download")
 				addElements "${@:2}" # We use everything after the -d/--download/--dl as an argument to addElement
+				convertElements # After adding the element, we convert them
 				;;
 			"-i" | "--install" )
 				installOrpheus
