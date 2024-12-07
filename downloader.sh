@@ -8,6 +8,7 @@
 GREEN="\e[32m"
 RED="\e[31m"
 YELLOW="\e[33m"
+MAGENTA="\e[35m"
 RESET="\e[0m"
 
 # Variables private to the script
@@ -19,13 +20,12 @@ toDownload=() # Variable that will store the list of things to download
 backupDirState=()
 
 # ENV VARIABLES
-PLATFORM="qobuz" # Streaming platform to download music from
-TYPE="album" # Media type. Only used for qobuz
-ORPHEUSDIR="$PWD/OrpheusDL" # directory where orpheusdl script is located
-STREAMRIPDIR="$PWD/Streamrip" # directory where streamrip downloads are located (script is in the python venv)
-DEST="" # Destination to put the downloaded files at the end
-ORPHEUSVENV="./.venv-orpheus" # Venv for orpheusdl
-STREAMRIPVENV="./venv-streamrip" # Venv for streamrip
+PLATFORM="${PLATFORM:-qobuz}" # Streaming platform to download music from
+TYPE="${TYPE:-album}" # Media type. Only used for qobuz
+ORPHEUSDIR="${ORPHEUSDIR:-./OrpheusDL}" # directory where orpheusdl script is located
+STREAMRIPDIR="${STREAMRIPDIR:-./Streamrip}" # directory where streamrip downloads are located (script is in the python venv)
+DEST="${DEST:-}" # Destination to put the downloaded files at the end
+VENV="${VENV:-}" # Virtualenv is unset by default
 
 ##################
 # GLOBAL FUNCTIONS
@@ -194,6 +194,26 @@ ${RED}Links for music piracy${RESET}
 "
 }
 
+# Function to show default values
+defaults () {
+	echo -e "
+${RED}About setting values:${RESET}
+
+  You can set values via environment variables, or via the option that corresponds to it. It's up to you to choose what you prefer
+  Below you'll find default values for different things used by the script, as well as the environment variable and the argument to set it.
+  Everything is also setable via options in the command, check them with the help commands
+
+${RED}Default values:${RESET}
+  ${GREEN}Qobuz${RESET}					The platform to download the music from		${YELLOW}(PLATFORM)${RESET}
+  ${GREEN}album${RESET}					Type of content to download			${YELLOW}(TYPE)${RESET}
+  ${GREEN}./OrpheusDL${RESET}				Directory where to find OrpheusDL		${YELLOW}(ORPHEUSDIR)${RESET}
+  ${GREEN}./Streamrip${RESET}				Directory where to put Streamrip downloads	${YELLOW}(STREAMRIPDIR)${RESET}
+  ${GREEN}./.venv-orpheus OR ./.venv-streamrip${RESET} The virtual environment to load			${YELLOW}(VENV)${RESET}
+  ${RED}unset${RESET}					Where to move the files after download		${YELLOW}(DEST)${RESET}
+"
+}
+
+
 # Help for "main menu"
 mainHelp () {
 	echo -e "
@@ -205,15 +225,17 @@ ${RED}Usage:${RESET} $0 [OPTIONS] COMMAND
     ${GREEN}-h, --help${RESET}		Show this message and exit (you can use it after a command to see the options for the command)
     ${GREEN}-p, --platform${RESET}	Platform you want to download from
     ${GREEN}-m, --move${RESET}		Where to move the files after download. If unset, files won't be moved.
-    ${GREEN}-v, --venv${RESET}		Path to the virtual environment
+    ${GREEN}-o, --orpheus${RESET}	Directory where to find OrpheusDL. ${YELLOW}Won't be treated if you use Streamrip${RESET}
+    ${GREEN}-s, --streamrip${RESET}	Directory where to put Streamrip downloads. ${YELLOW}Won't be treated if you use OrpheusDL${RESET}
     ${GREEN}-t, --type${RESET}		Type of the media you want to download. ${RED}Required only if you provide end of URLs rather than full URLs${RESET}
+    ${GREEN}-v, --venv${RESET}		Path to the virtual environment
     ${GREEN}-z, --zfill${RESET}		Add a zero before each downloaded track number if needed
   
   ${RED}Commands:${RESET}
-    ${GREEN}streamrip${RESET}	Actions related to Streamrip
-    ${GREEN}orpheus${RESET}	Actions related to OrpheusDL
-    ${GREEN}links${RESET}	Print links to useful resources for music piracy
-    ${GREEN}defaults${RESET}	Show default values for OrpheusDL virtual environment, media type, ...
+    ${GREEN}[${MAGENTA}s${GREEN}]treamrip${RESET}	Actions related to Streamrip
+    ${GREEN}[${MAGENTA}o${GREEN}]rpheus${RESET}	Actions related to OrpheusDL
+    ${GREEN}[${MAGENTA}l${GREEN}]inks${RESET}	Print links to useful resources for music piracy
+    ${GREEN}[${MAGENTA}d${GREEN}]efaults${RESET}	Show default values for OrpheusDL virtual environment, media type, ...
 	"
 }
 
@@ -522,6 +544,9 @@ case "$1" in
 		;;
 	"l" | "links")
 		links
+		;;
+	"d" | "defaults")
+		defaults
 		;;
 	*)
 		mainHelp
