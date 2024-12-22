@@ -23,9 +23,12 @@ backupDirState=()
 PLATFORM="${PLATFORM:-qobuz}" # Streaming platform to download music from
 TYPE="${TYPE:-album}" # Media type. Only used for qobuz
 ORPHEUSDIR="${ORPHEUSDIR:-./OrpheusDL}" # directory where orpheusdl script is located
+forceModules=0 # If we want to force OrpheusDL module installation. No by default
 STREAMRIPDIR="${STREAMRIPDIR:-./Streamrip}" # directory where streamrip downloads are located (script is in the python venv)
 DEST="${DEST:-}" # Destination to put the downloaded files at the end
-VENV="${VENV:-}" # Virtualenv is unset by default
+# NOTE: VENV is unset by default, but at the end of the file, if it's unset we set it to ./venv-streamrip or ./venv-orpheus
+# So even if all along the functions it looks like it's unset, we set it before loading the functions
+VENV="${VENV:-}"
 
 ##################
 # GLOBAL FUNCTIONS
@@ -253,6 +256,7 @@ ${RED}Usage:${RESET} $0 orpheus [OPTIONS]
     ${GREEN}-h, --help${RESET}		Show this message and exit
     ${GREEN}-d, --download${RESET}	${YELLOW}Content${RESET} to download, each element being separated by a space. If ${YELLOW}unset${RESET}, switch to interactive download mode.
     ${GREEN}-i, --install${RESET}	Install OrpheusDL & creates a python virtualenv at ${YELLOW}$VENV${RESET}
+    ${GREEN}-f, --force${RESET}		Force module installation (even if it's already installed)
 
 
   ${RED}Definitions:${RESET}
@@ -304,26 +308,43 @@ installOrpheus () {
 # Function to install OrpheusDL modules
 # Takes the modules the user wants to download as arguments
 orpheusModules () {
+	source "$VENV/bin/activate" # We source the virtualenv
 	checkOrpheusDir "$ORPHEUSDIR" # We check orpheus directory given by the user
 	# Entering into OrpheusDL directory, exit with an error in case something wrong happens (you cant be too careful i guess)
 	cd "$ORPHEUSDIR" || echoError "Can't cd into the directory were OrpheusDL is supposed to be"
 	# Before installing modules, we will build an array that stores the modules that are already installed
+	# We will also remove already installed modules if forceModules=true
 	installedModules=()
 	# We loop over every possible module name
 	for i in "${possibleModules[@]}"; do
-		# We simply check if the module has a folder in OrpheusDL modules folder, and if it's not empty
-		if [[ -d "./modules/$i" && -e "./modules/$i/*" ]]; then
+		# If the folder exists but it's empty, we remove it
+		if [[ -d "./modules/$i" && -z "$(ls -A ./modules/"$i")" ]]; then
+			echo -e "${YELLOW}Warning:${RESET} Folder for ${MAGENTA}$i${RESET} exists, but it is empty. Removing..."
+			rm -rf "./modules/$i" ||
+				echoError "Can't remove folder for ${MAGENTA}$i${RESET} module, while the it is supposed to exist. Please report bug on Github"
+			echo "Removed."
+		fi
+		# Else, if the module has a folder in OrpheusDL modules folder, and if it's not empty, we add it to installedModules
+		if [[ -d "./modules/$i" && -n "$(ls -A ./modules/"$i")" ]]; then
 			installedModules+=("$i")
 		fi
 	done
-	modules=() # Will contain the modules to download
 	# We parse until there is no module left to download (no more elements, or next element is an argument)
-	# We always analyze only the first argument (add the end we shift elements to the left)
+	# We always analyze only the first argument (at the end we shift elements to the left)
 	while [[ $# -gt 0 && ${1:0:1} != "-" ]]; do
 		currentModule="$(echo "$1" | tr "\[A-Z\]" "\[a-z\]")" # We make module name lowercase, just in case
-		# If the module is already installed, we don't reinstall it
+		# If the module is already installed, we check if forced modules installation is enabled or not
 		if [[ "${installedModules[*]}" =~ (^|[[:space:]])"$currentModule"($|[[:space:]]) ]]; then
-			echo "${YELLOW}Warning:${RESET} Module already installed. Passing..."
+			# If forced modules installation is enabled, then remove the folder and add the modules to the download list
+			if [[ $forceModules == 1 ]]; then
+				echo -e "${YELLOW}Warning:${RESET} Folder for ${MAGENTA}$currentModule${RESET} exists, but forced module installation is enabled."
+				rm -rf "./modules/$i" ||
+					echoError "Can't remove folder for ${MAGENTA}$i${RESET} module, while the it is supposed to exist. Please report bug on Github"
+				modules+=("$currentModule")
+			# Otherwise, we dont add the module to the download list and we output a warning message
+			else
+				echo -e "${YELLOW}Warning:${RESET} Module for ${MAGENTA}$currentModule${RESET} already installed. Passing..."
+			fi
 		# Else, we add the module to the download list only if it's a valid value
 		elif [[ "${possibleModules[*]}" =~ (^|[[:space:]])"$currentModule"($|[[:space:]]) ]]; then
 			modules+=("$currentModule")
@@ -334,38 +355,29 @@ orpheusModules () {
 		shift
 	done
 	# Now that we have a list of valid module names, we simply loop over the array and download the wanted ones
-	for m in "${modules[@]}"; do
-		if [[ "$m" == "deezer" ]]; then
-			url="heKVT/orpheusdl-deezer"
-		elif [[ "$m" == "beatport" ]]; then
-			url="Dniel97/orpheusdl-beatport"
-		elif [[ "$m" == "bugs" ]]; then
-			url="Dniel97/orpheusdl-bugsmusic"
-		elif [[ "$m" == "idagio" ]]; then
-			url="Dniel97/orpheusdl-idagio"
-		elif [[ "$m" == "jiosaavn" ]]; then
-			url="bunnykek/orpheusdl-jiosaavn"
-		elif [[ "$m" == "kkbox" ]]; then
-			url="uhwot/orpheusdl-kkbox"
-		elif [[ "$m" == "napster" ]]; then
-			url="OrfiDev/orpheusdl-napster"
-		elif [[ "$m" == "nugs" ]]; then
-			url="Dniel97/orpheusdl-nugs"
-		elif [[ "$m" == "qobuz" ]]; then
-			url="TheKVT/orpheusdl-qobuz"
-		elif [[ "$m" == "soundcloud" ]]; then
-			url="OrfiDev/orpheusdl-soundcloud"
-		elif [[ "$m" == "tidal" ]]; then
-			url="Dniel97/orpheusdl-tidal"
-		fi
-		# Now that we know the end of the github url, we can git clone the module
-		echo -e "${GREEN}Cloning OrpheusDL's $m module...${RESET}"
-		# Clone the module in the modules folder
-		git clone --recurse-submodules "https://github.com/$url" "./modules/$m" ||
-			echoError "Can't clone OrpheusDL's $m module github repository. Maybe check your internet connection?"
-		echo -e "${GREEN}Updating OrpheusDL configuration...${RESET}"
-		python orpheus.py || echoError "Can't update orpheus.py settings. Check your OrpheusDL installation"
-	done
+	if [[ ${#modules} -gt 0 ]]; then
+		for m in "${modules[@]}"; do
+			if [[ "qobuz deezer" =~ "$m" ]]; then
+				url="TheKVT/orpheusdl-$m"
+			elif [[ "beatport bugs idagio nugs tidal" =~ "$m" ]]; then
+				url="Dniel97/orpheusdl-$m"
+			elif [[ "$m" == "jiosaavn" ]]; then
+				url="bunnykek/orpheusdl-jiosaavn"
+			elif [[ "$m" == "kkbox" ]]; then
+				url="uhwot/orpheusdl-kkbox"
+			elif [[ "napster soundcloud" =~ "$m" ]]; then
+				url="OrfiDev/orpheusdl-$m"
+			fi
+			# Now that we know the end of the github url, we can git clone the module
+			echo -e "${GREEN}Cloning OrpheusDL's $m module...${RESET}"
+			# Clone the module in the modules folder
+			git clone --recurse-submodules "https://github.com/$url" "./modules/$m" ||
+				echoError "Can't clone OrpheusDL's $m module github repository. Maybe check your internet connection?"
+			echo -e "${GREEN}Updating OrpheusDL configuration...${RESET}"
+			python orpheus.py || echoError "Can't update orpheus.py settings. Check your OrpheusDL installation"
+			deactivate # We deactivate the virtualenv
+		done
+	fi
 }
 
 # Main command (like a hub) for OrpheusDL related argument parsing
@@ -384,7 +396,7 @@ orpheus () {
 		# Arguments starts by "-" so we check only elements that starts by "-"
 		if [[ "${i:0:1}" == "-" ]]; then
 			# If any argument is "-h" or "--help", or if there is an unrecognized argument, print help and exit without doing anything
-			if [[ "--help -h" =~ (^|[[:space:]])$i($|[[:space:]]) || ! "-i --install -d --download -m --module" =~ (^|[[:space:]])$i($|[[:space:]]) ]]; then
+			if [[ "--help -h" =~ (^|[[:space:]])$i($|[[:space:]]) || ! "-f --force -i --install -d --download -m --module" =~ (^|[[:space:]])$i($|[[:space:]]) ]]; then
 				orpheusHelp
 				exit 0
 			fi
@@ -402,6 +414,9 @@ orpheus () {
 				;;
 			"-m" | "--module")
 				orpheusModules "${@:2}" # We pass all after the -m/--module as arguments
+				;;
+			"-f" | "--force")
+				forceModules=1
 				;;
 		esac
 		# We do a simple shift, to remove the argument we just treated

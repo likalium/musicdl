@@ -18,7 +18,6 @@ I recommend to put the script in it's own directory, so OrpheusDL, Streamrip, an
 ## TODO
 - [ ] Support more OrpheusDL options
 - [ ] Support for search functions
-- [ ] Add an option to force module download, even if the module is already installed
 - [ ] Add zfill function
 - [ ] Add the function that show information about default values
 - [ ] Make a python version for better compatibility with windows
@@ -27,4 +26,5 @@ I recommend to put the script in it's own directory, so OrpheusDL, Streamrip, an
 - [x] Help functions
 - [x] OrpheusDL base features
 - [x] Support for OrpheusDL modules
+- [x] Add an option to force module download, even if the module is already installed
 - [x] Make functions for streamrip
