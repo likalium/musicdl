@@ -23,7 +23,7 @@ backupDirState=()
 PLATFORM="${PLATFORM:-qobuz}" # Streaming platform to download music from
 TYPE="${TYPE:-album}" # Media type. Only used for qobuz
 ORPHEUSDIR="${ORPHEUSDIR:-./OrpheusDL}" # directory where orpheusdl script is located
-forceModules=0 # If we want to force OrpheusDL module installation. No by default
+FORCEMODULES=0 # If we want to force OrpheusDL module installation. No by default
 STREAMRIPDIR="${STREAMRIPDIR:-./Streamrip}" # directory where streamrip downloads are located (script is in the python venv)
 DEST="${DEST:-}" # Destination to put the downloaded files at the end
 # NOTE: VENV is unset by default, but at the end of the file, if it's unset we set it to ./venv-streamrip or ./venv-orpheus
@@ -203,16 +203,17 @@ defaults () {
 ${RED}About setting values:${RESET}
 
   You can set values via environment variables, or via the option that corresponds to it. It's up to you to choose what you prefer
-  Below you'll find default values for different things used by the script, as well as the environment variable and the argument to set it.
+  Below you'll find default values for different things used by the script, as well as the environment variable to set it.
   Everything is also setable via options in the command, check them with the help commands
 
 ${RED}Default values:${RESET}
-  ${GREEN}Qobuz${RESET}					The platform to download the music from		${YELLOW}(PLATFORM)${RESET}
-  ${GREEN}album${RESET}					Type of content to download			${YELLOW}(TYPE)${RESET}
-  ${GREEN}./OrpheusDL${RESET}				Directory where to find OrpheusDL		${YELLOW}(ORPHEUSDIR)${RESET}
-  ${GREEN}./Streamrip${RESET}				Directory where to put Streamrip downloads	${YELLOW}(STREAMRIPDIR)${RESET}
-  ${GREEN}./.venv-orpheus OR ./.venv-streamrip${RESET} The virtual environment to load			${YELLOW}(VENV)${RESET}
-  ${RED}unset${RESET}					Where to move the files after download		${YELLOW}(DEST)${RESET}
+  ${GREEN}Qobuz${RESET}					The platform to download the music from			${YELLOW}(PLATFORM)${RESET}
+  ${GREEN}album${RESET}					Type of content to download				${YELLOW}(TYPE)${RESET}
+  ${GREEN}./OrpheusDL${RESET}				Directory where to find OrpheusDL			${YELLOW}(ORPHEUSDIR)${RESET}
+  ${GREEN}./Streamrip${RESET}				Directory where to put Streamrip downloads		${YELLOW}(STREAMRIPDIR)${RESET}
+  ${GREEN}./.venv-orpheus OR ./.venv-streamrip${RESET}	The virtual environment to load				${YELLOW}(VENV)${RESET}
+  ${GREEN}0${RESET}					Force OrpheusDL module installation or not (0 or 1)	${YELLOW}(FORCEMODULES)${RESET}
+  ${RED}unset${RESET}					Where to move the files after download			${YELLOW}(DEST)${RESET}
 "
 }
 
@@ -261,7 +262,7 @@ ${RED}Usage:${RESET} $0 orpheus [OPTIONS]
 
   ${RED}Definitions:${RESET}
     ${YELLOW}content${RESET}	Something to download. Can be an URL or, in case of qobuz, an album id, an artist id...
-    ${YELLOW}unset${RESET}	To let the --download option unset, you can not put it in your command, or put it without giving any value
+    ${YELLOW}unset${RESET}	To let the --download option unset, put it in your command without giving any value
 "
 }
 
@@ -313,7 +314,7 @@ orpheusModules () {
 	# Entering into OrpheusDL directory, exit with an error in case something wrong happens (you cant be too careful i guess)
 	cd "$ORPHEUSDIR" || echoError "Can't cd into the directory were OrpheusDL is supposed to be"
 	# Before installing modules, we will build an array that stores the modules that are already installed
-	# We will also remove already installed modules if forceModules=true
+	# We will also remove already installed modules if FORCEMODULES=true
 	installedModules=()
 	# We loop over every possible module name
 	for i in "${possibleModules[@]}"; do
@@ -331,12 +332,13 @@ orpheusModules () {
 	done
 	# We parse until there is no module left to download (no more elements, or next element is an argument)
 	# We always analyze only the first argument (at the end we shift elements to the left)
+	modules=() # Will contain all the modules we will download
 	while [[ $# -gt 0 && ${1:0:1} != "-" ]]; do
 		currentModule="$(echo "$1" | tr "\[A-Z\]" "\[a-z\]")" # We make module name lowercase, just in case
 		# If the module is already installed, we check if forced modules installation is enabled or not
 		if [[ "${installedModules[*]}" =~ (^|[[:space:]])"$currentModule"($|[[:space:]]) ]]; then
 			# If forced modules installation is enabled, then remove the folder and add the modules to the download list
-			if [[ $forceModules == 1 ]]; then
+			if [[ $FORCEMODULES == 1 ]]; then
 				echo -e "${YELLOW}Warning:${RESET} Folder for ${MAGENTA}$currentModule${RESET} exists, but forced module installation is enabled."
 				rm -rf "./modules/$i" ||
 					echoError "Can't remove folder for ${MAGENTA}$i${RESET} module, while the it is supposed to exist. Please report bug on Github"
@@ -416,7 +418,7 @@ orpheus () {
 				orpheusModules "${@:2}" # We pass all after the -m/--module as arguments
 				;;
 			"-f" | "--force")
-				forceModules=1
+				FORCEMODULES=1
 				;;
 		esac
 		# We do a simple shift, to remove the argument we just treated
@@ -514,7 +516,7 @@ streamrip () {
 		# We shift the positional parameters to the left (2nd argument replaces 1st one, 3rd argument replaces 2nd...)
 		shift
 	done
-	# We launched download after all argument have been parsed and if toDownload isn't empty
+	# We launch download after all argument have been parsed and if toDownload isn't empty
 	if [[ ${#toDownload[@]} -gt 0 ]]; then
 		downloadStreamrip
 	fi
